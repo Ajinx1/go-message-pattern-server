@@ -1,0 +1,9 @@
+# github.com/jeanphorn/log4go v0.0.0-20231225120528-d93eb9001e51
+## explicit; go 1.18
+github.com/jeanphorn/log4go
+# github.com/toolkits/file v0.0.0-20160325033739-a5b3c5147e07
+## explicit
+github.com/toolkits/file
+# golang.org/x/time v0.12.0
+## explicit; go 1.23.0
+golang.org/x/time/rate
