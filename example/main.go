@@ -14,7 +14,7 @@ func main() {
 	defer cancel()
 
 	config := &rpc.Config{
-		Addr:    ":4061",
+		Addr:    ":4069",
 		Timeout: 30 * time.Second,
 	}
 
@@ -25,7 +25,7 @@ func main() {
 	})
 
 	go server.Start()
-	fmt.Println("RPC Server started on :4061")
+	fmt.Println("RPC Server started on :4069")
 
 	time.Sleep(time.Second * 100)
 	server.Shutdown(ctx)

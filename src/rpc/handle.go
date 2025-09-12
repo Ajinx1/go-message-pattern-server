@@ -2,7 +2,6 @@ package rpc
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -139,8 +138,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 				continue
 			}
 
-			var req Request
-			if err := json.Unmarshal(msgBytes, &req); err != nil {
+			req, err := parseRequest(msgBytes)
+			if err != nil {
 				s.metrics.mu.Lock()
 				s.metrics.ErrorsTotal++
 				s.metrics.mu.Unlock()
