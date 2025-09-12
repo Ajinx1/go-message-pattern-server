@@ -1,11 +1,12 @@
 package rpc
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/Ajinx1/go-message-pattern-server/src/utility"
@@ -26,11 +27,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	scanner := bufio.NewScanner(conn)
 	heartbeatTimer := time.NewTimer(s.config.HeartbeatTimeout)
 	defer heartbeatTimer.Stop()
 
-	// Handle heartbeats
+	// Handle heartbeats (unchanged)
 	go func() {
 		ticker := time.NewTicker(s.config.HeartbeatInterval)
 		defer ticker.Stop()
@@ -44,8 +44,82 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 	}()
 
-	for scanner.Scan() {
-		// Reset heartbeat timer on any received message
+	// Main read loop using length-prefixed framing: "<len>#<json bytes>"
+	for {
+		// 1) Read length prefix until '#'
+		lengthBuf := make([]byte, 0, 16)
+		tmp := make([]byte, 1)
+		for {
+			n, err := conn.Read(tmp)
+			if err != nil {
+				// Connection closed or read error — treat like scanner end
+				if err == io.EOF {
+					// graceful close by peer
+					return
+				}
+				// Log & increment error metrics then return
+				s.metrics.mu.Lock()
+				s.metrics.ErrorsTotal++
+				s.metrics.mu.Unlock()
+				utility.LogAndPrint(fmt.Sprintf("RPC: Read error (prefix) | RemoteAddr: %s | Error: %v",
+					conn.RemoteAddr().String(), err))
+				return
+			}
+			if n == 0 {
+				continue
+			}
+			if tmp[0] == '#' {
+				break
+			}
+			lengthBuf = append(lengthBuf, tmp[0])
+			// defensive: avoid runaway length prefix
+			if len(lengthBuf) > 32 {
+				s.metrics.mu.Lock()
+				s.metrics.ErrorsTotal++
+				s.metrics.mu.Unlock()
+				s.sendError(conn, "unknown", "Invalid length prefix (too long)")
+				return
+			}
+		}
+
+		msgLenStr := string(lengthBuf)
+		msgLen, err := strconv.Atoi(msgLenStr)
+		if err != nil || msgLen <= 0 {
+			s.metrics.mu.Lock()
+			s.metrics.ErrorsTotal++
+			s.metrics.mu.Unlock()
+			s.sendError(conn, "unknown", fmt.Sprintf("Invalid length prefix: %s", msgLenStr))
+			// continue to next message (or connection likely unusable)
+			continue
+		}
+
+		// 2) Read exactly msgLen bytes
+		msgBytes := make([]byte, msgLen)
+		totalRead := 0
+		for totalRead < msgLen {
+			n, err := conn.Read(msgBytes[totalRead:])
+			if err != nil {
+				if err == io.EOF {
+					s.metrics.mu.Lock()
+					s.metrics.ErrorsTotal++
+					s.metrics.mu.Unlock()
+					utility.LogAndPrint(fmt.Sprintf("RPC: Unexpected EOF while reading message body | RemoteAddr: %s",
+						conn.RemoteAddr().String()))
+					return
+				}
+				s.metrics.mu.Lock()
+				s.metrics.ErrorsTotal++
+				s.metrics.mu.Unlock()
+				s.sendError(conn, "unknown", fmt.Sprintf("Read error: %v", err))
+				return
+			}
+			if n == 0 {
+				continue
+			}
+			totalRead += n
+		}
+
+		// Reset heartbeat timer on any received message (similar effect to scanner.Scan())
 		if !heartbeatTimer.Stop() {
 			select {
 			case <-heartbeatTimer.C:
@@ -54,18 +128,19 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 		heartbeatTimer.Reset(s.config.HeartbeatTimeout)
 
+		// Check if server is shutting down
 		select {
 		case <-ctx.Done():
 			utility.LogAndPrint(fmt.Sprintf("RPC: Connection closed | RemoteAddr: %s", conn.RemoteAddr().String()))
 			return
 		default:
-			jsonBytes := scanner.Bytes()
-			if len(jsonBytes) == 0 {
+			// parse request (same as before)
+			if len(msgBytes) == 0 {
 				continue
 			}
 
 			var req Request
-			if err := json.Unmarshal(jsonBytes, &req); err != nil {
+			if err := json.Unmarshal(msgBytes, &req); err != nil {
 				s.metrics.mu.Lock()
 				s.metrics.ErrorsTotal++
 				s.metrics.mu.Unlock()
@@ -98,7 +173,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			utility.LogAndPrint(fmt.Sprintf("RPC: Received request | Pattern: %s | RemoteAddr: %s | Time: %s",
 				req.Pattern.Cmd, conn.RemoteAddr().String(), time.Now().Format("2006-01-02 15:04:05")))
 
-			// Retry logic for handler execution
+			// Retry logic for handler execution (unchanged)
 			var result interface{}
 			var handlerErr error
 			for attempt := 0; attempt <= s.config.RetryAttempts; attempt++ {
@@ -121,7 +196,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 					s.metrics.ErrorsTotal++
 					s.metrics.mu.Unlock()
 					s.sendError(conn, req.Pattern.Cmd, "Unknown pattern")
-					continue
+					// continue to next incoming message
+					goto NEXT_MESSAGE
 				}
 			}
 
@@ -135,23 +211,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 			s.sendResponse(conn, req.Pattern.Cmd, Response{Data: result})
 		}
+	NEXT_MESSAGE:
+		// continue to next loop iteration
+		continue
 	}
 
-	if err := scanner.Err(); err != nil {
-		s.metrics.mu.Lock()
-		s.metrics.ErrorsTotal++
-		s.metrics.mu.Unlock()
-		utility.LogAndPrint(fmt.Sprintf("RPC: Scanner error | RemoteAddr: %s | Error: %v",
-			conn.RemoteAddr().String(), err))
-	}
-
-	// Check for heartbeat timeout
-	select {
-	case <-heartbeatTimer.C:
-		s.metrics.mu.Lock()
-		s.metrics.HeartbeatFails++
-		s.metrics.mu.Unlock()
-		utility.LogAndPrint(fmt.Sprintf("RPC: Heartbeat timeout | RemoteAddr: %s", conn.RemoteAddr().String()))
-	case <-ctx.Done():
-	}
 }

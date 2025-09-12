@@ -27,6 +27,6 @@ func main() {
 	go server.Start()
 	fmt.Println("RPC Server started on :4061")
 
-	time.Sleep(time.Second * 10)
+	time.Sleep(time.Second * 100)
 	server.Shutdown(ctx)
 }
