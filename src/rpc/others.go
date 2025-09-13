@@ -35,7 +35,7 @@ func (s *Server) sendHeartbeat(conn net.Conn) {
 		}
 	}()
 
-	resp := Response{Data: "ping"}
+	resp := Response{Response: "ping", Id: "heartbeat", IsDisposed: true}
 	jsonBytes, err := json.Marshal(resp)
 	if err != nil {
 		utility.LogAndPrint(fmt.Sprintf("RPC: Failed to marshal heartbeat | Error: %v", err))

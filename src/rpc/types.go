@@ -16,8 +16,11 @@ type Request struct {
 }
 
 type Response struct {
-	Data  interface{} `json:"data,omitempty"`
-	Error string      `json:"error,omitempty"`
+	Id         string      `json:"id,omitempty"`
+	Response   interface{} `json:"response,omitempty"`
+	IsDisposed bool        `json:"isDisposed,omitempty"`
+	Status     string      `json:"status,omitempty"`
+	Err        string      `json:"err,omitempty"`
 }
 
 func parseRequest(msgBytes []byte) (*Request, error) {

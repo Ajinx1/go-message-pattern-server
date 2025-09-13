@@ -35,7 +35,7 @@ func (s *Server) sendResponse(conn net.Conn, pattern string, resp Response) {
 
 // sendError sends an error response using length-prefixed framing
 func (s *Server) sendError(conn net.Conn, pattern, msg string) {
-	resp := Response{Error: msg}
+	resp := Response{Err: msg, Status: "error", IsDisposed: true}
 	jsonBytes, err := json.Marshal(resp)
 	if err != nil {
 		utility.LogAndPrint(fmt.Sprintf("RPC: Failed to marshal error response | Error: %v", err))

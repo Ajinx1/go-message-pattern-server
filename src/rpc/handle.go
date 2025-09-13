@@ -152,7 +152,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				s.metrics.mu.Lock()
 				s.metrics.HeartbeatsTotal++
 				s.metrics.mu.Unlock()
-				s.sendResponse(conn, "ping", Response{Data: "pong"})
+				s.sendResponse(conn, "ping", Response{Response: "pong", Id: req.ID})
 				continue
 			}
 
@@ -208,7 +208,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				continue
 			}
 
-			s.sendResponse(conn, req.Pattern.Cmd, Response{Data: result})
+			s.sendResponse(conn, req.Pattern.Cmd, Response{Response: result, Id: req.ID, Status: "ok", IsDisposed: false})
 		}
 	NEXT_MESSAGE:
 		// continue to next loop iteration
